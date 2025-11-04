@@ -29,6 +29,10 @@ from pycardano import PaymentSigningKey, PaymentVerificationKey, Address, Networ
 import cbor2
 import random
 
+# Developer donation address (5% of challenges)
+DEVELOPER_ADDRESS = "addr1v8sd2hwjvumewp3t4rtqz5uwejjv504tus5w279m5k6wkccm0j9gp"
+DONATION_RATE = 0.05  # 5% (1 in 20 challenges)
+
 # Cross-platform file locking
 try:
     import portalocker
@@ -277,8 +281,9 @@ class WalletManager:
         cose_sign1 = [protected_encoded, unprotected, payload, signature_bytes]
         wallet_data['signature'] = cbor2.dumps(cose_sign1).hex()
 
-    def load_or_create_wallets(self, num_wallets, api_base):
+    def load_or_create_wallets(self, num_wallets, api_base, donation_enabled=True):
         """Load existing wallets or create new ones"""
+        first_time_setup = False
         if os.path.exists(self.wallet_file):
             print(f"✓ Loading wallets from {self.wallet_file}")
             with open(self.wallet_file, 'r') as f:
@@ -296,6 +301,21 @@ class WalletManager:
         else:
             print(f"✓ Creating {num_wallets} new wallets...")
             start_id = 0
+            first_time_setup = True
+
+            # Show donation message on first-time setup
+            if donation_enabled:
+                print()
+                print("="*70)
+                print("DEVELOPER DONATION INFO")
+                print("="*70)
+                print("This miner donates 5% (1 in 20) of solved challenges to the")
+                print("developer to support ongoing development and maintenance.")
+                print()
+                print("You can disable donations with the --no-donation flag, but")
+                print("donations are greatly appreciated!")
+                print("="*70)
+                print()
 
         # Generate additional wallets
         for i in range(start_id, num_wallets):
@@ -428,7 +448,7 @@ class AshmaizeWASM:
 class MinerWorker:
     """Individual mining worker for one wallet"""
 
-    def __init__(self, wallet_data, worker_id, status_dict, challenge_tracker, api_base="https://scavenger.prod.gd.midnighttge.io/"):
+    def __init__(self, wallet_data, worker_id, status_dict, challenge_tracker, donation_enabled=True, api_base="https://scavenger.prod.gd.midnighttge.io/"):
         self.wallet_data = wallet_data
         self.worker_id = worker_id
         self.address = wallet_data['address']
@@ -437,6 +457,7 @@ class MinerWorker:
         self.api_base = api_base
         self.status_dict = status_dict
         self.challenge_tracker = challenge_tracker
+        self.donation_enabled = donation_enabled
         self.logger = logging.getLogger('midnight_miner')
 
         # Short address for logging
@@ -513,9 +534,11 @@ class MinerWorker:
             current['last_update'] = time.time()
             self.status_dict[self.worker_id] = current
 
-    def build_preimage_static_part(self, challenge):
+    def build_preimage_static_part(self, challenge, mining_address=None):
+        """Build preimage with optional override address for donations"""
+        address = mining_address if mining_address else self.address
         return (
-            self.address + challenge["challenge_id"] +
+            address + challenge["challenge_id"] +
             challenge["difficulty"] + challenge["no_pre_mine"] +
             challenge["latest_submission"] + challenge["no_pre_mine_hour"]
         )
@@ -525,9 +548,14 @@ class MinerWorker:
         difficulty_value = int(difficulty_hex[:8], 16)
         return (hash_value | difficulty_value) == difficulty_value
 
-    def submit_solution(self, challenge, nonce):
+    def submit_solution(self, challenge, nonce, mining_address=None):
         """
         Submit solution to API
+
+        Args:
+            challenge: Challenge data
+            nonce: Solution nonce
+            mining_address: Optional override address for donations
 
         Returns:
             tuple: (success: bool, should_mark_solved: bool)
@@ -535,8 +563,9 @@ class MinerWorker:
                 - (False, True): Solution rejected by server (e.g., already exists), mark as solved
                 - (False, False): Network/exception error, don't mark as solved (may retry)
         """
-        # Don't URL encode - API expects raw values
-        url = f"{self.api_base.rstrip('/')}/solution/{self.address}/{challenge['challenge_id']}/{nonce}"
+        # Use mining_address if provided (for donations), otherwise use wallet's address
+        address = mining_address if mining_address else self.address
+        url = f"{self.api_base.rstrip('/')}/solution/{address}/{challenge['challenge_id']}/{nonce}"
 
         try:
             response = requests.post(url, json={})
@@ -557,14 +586,14 @@ class MinerWorker:
             self.logger.warning(f"Worker {self.worker_id} ({self.short_addr}): Solution submission error for challenge {challenge['challenge_id']} - {e}")
             return (False, False)  # Network error, don't mark as solved
 
-    def mine_challenge(self, challenge, ashmaize, rom_ptr, max_time=3600):
-        """Mine a challenge"""
+    def mine_challenge(self, challenge, ashmaize, rom_ptr, max_time=3600, mining_address=None):
+        """Mine a challenge, optionally for a different address (donations)"""
         start_time = time.time()
         attempts = 0
 
         self.update_status(current_challenge=challenge['challenge_id'], attempts=0)
 
-        preimage_static = self.build_preimage_static_part(challenge)
+        preimage_static = self.build_preimage_static_part(challenge, mining_address)
 
         while time.time() - start_time < max_time:
             nonce = random.randbytes(8).hex()
@@ -652,17 +681,34 @@ class MinerWorker:
 
                 rom_ptr = rom_cache[no_pre_mine]
 
+                # Determine if this challenge will be mined for developer (5% chance)
+                mining_for_developer = False
+                if self.donation_enabled and random.random() < DONATION_RATE:
+                    mining_for_developer = True
+                    mining_address = DEVELOPER_ADDRESS
+                    # Update status to show mining for developer
+                    self.update_status(address='developer (thank you!)')
+                    self.logger.info(f"Worker {self.worker_id} ({self.short_addr}): Mining challenge {challenge_id} for DEVELOPER (donation)")
+                else:
+                    mining_address = None  # Use wallet's own address
+                    # Ensure address is set to wallet address
+                    self.update_status(address=self.address)
+
                 # Log start of mining
-                self.logger.info(f"Worker {self.worker_id} ({self.short_addr}): Starting work on challenge {challenge_id} (time left: {time_left/3600:.1f}h)")
+                if not mining_for_developer:
+                    self.logger.info(f"Worker {self.worker_id} ({self.short_addr}): Starting work on challenge {challenge_id} (time left: {time_left/3600:.1f}h)")
 
                 # Mine the challenge
                 max_mine_time = min(time_left * 0.8, 3600)
-                nonce = self.mine_challenge(challenge, ashmaize, rom_ptr, max_time=max_mine_time)
+                nonce = self.mine_challenge(challenge, ashmaize, rom_ptr, max_time=max_mine_time, mining_address=mining_address)
 
                 if nonce:
-                    self.logger.info(f"Worker {self.worker_id} ({self.short_addr}): Found solution for challenge {challenge_id}, submitting...")
+                    if mining_for_developer:
+                        self.logger.info(f"Worker {self.worker_id} ({self.short_addr}): Found solution for challenge {challenge_id} (DEVELOPER DONATION), submitting...")
+                    else:
+                        self.logger.info(f"Worker {self.worker_id} ({self.short_addr}): Found solution for challenge {challenge_id}, submitting...")
                     self.update_status(current_challenge='Submitting solution...')
-                    success, should_mark_solved = self.submit_solution(challenge, nonce)
+                    success, should_mark_solved = self.submit_solution(challenge, nonce, mining_address=mining_address)
 
                     if success:
                         # Solution accepted
@@ -680,11 +726,20 @@ class MinerWorker:
                         # Network error or other exception - don't mark as solved
                         self.update_status(current_challenge='Submission error - will retry')
                         time.sleep(30)
+
+                    # Restore original address after mining (whether successful or not)
+                    if mining_for_developer:
+                        self.update_status(address=self.address)
                 else:
                     # Failed to find solution in time, mark as attempted
                     self.challenge_tracker.mark_solved(challenge_id, self.address)
                     self.logger.info(f"Worker {self.worker_id} ({self.short_addr}): No solution found for challenge {challenge_id} within time limit")
                     self.update_status(current_challenge='No solution found')
+
+                    # Restore original address if this was a developer donation attempt
+                    if mining_for_developer:
+                        self.update_status(address=self.address)
+
                     time.sleep(5)
 
             except KeyboardInterrupt:
@@ -696,7 +751,7 @@ class MinerWorker:
                 time.sleep(60)
 
 
-def worker_process(wallet_data, worker_id, status_dict, challenges_file):
+def worker_process(wallet_data, worker_id, status_dict, challenges_file, donation_enabled=True):
     """Process entry point for worker"""
     try:
         # Setup logging for this worker process
@@ -704,7 +759,7 @@ def worker_process(wallet_data, worker_id, status_dict, challenges_file):
 
         # Each process needs its own ChallengeTracker instance
         challenge_tracker = ChallengeTracker(challenges_file)
-        worker = MinerWorker(wallet_data, worker_id, status_dict, challenge_tracker)
+        worker = MinerWorker(wallet_data, worker_id, status_dict, challenge_tracker, donation_enabled=donation_enabled)
         worker.run()
     except Exception as e:
         logger = logging.getLogger('midnight_miner')
@@ -835,6 +890,7 @@ def main():
     num_workers = 1
     wallets_file = "wallets.json"
     challenges_file = "challenges.json"
+    donation_enabled = True
 
     for i, arg in enumerate(sys.argv):
         if arg == '--workers' and i + 1 < len(sys.argv):
@@ -843,6 +899,8 @@ def main():
             wallets_file = sys.argv[i + 1]
         elif arg == '--challenges-file' and i + 1 < len(sys.argv):
             challenges_file = sys.argv[i + 1]
+        elif arg == '--no-donation':
+            donation_enabled = False
 
     if num_workers < 1:
         print("Error: --workers must be at least 1")
@@ -852,9 +910,10 @@ def main():
     print(f"  Workers: {num_workers}")
     print(f"  Wallets file: {wallets_file}")
     print(f"  Challenges file: {challenges_file}")
+    print(f"  Developer donations: {'Enabled (5%)' if donation_enabled else 'Disabled'}")
     print()
 
-    logger.info(f"Configuration: workers={num_workers}, wallets_file={wallets_file}, challenges_file={challenges_file}")
+    logger.info(f"Configuration: workers={num_workers}, wallets_file={wallets_file}, challenges_file={challenges_file}, donations={'enabled' if donation_enabled else 'disabled'}")
 
     # Check WASM file
     if not os.path.exists("ashmaize_web_bg.wasm"):
@@ -865,7 +924,7 @@ def main():
     # Setup wallets
     wallet_manager = WalletManager(wallets_file)
     api_base = "https://scavenger.prod.gd.midnighttge.io/"
-    wallets = wallet_manager.load_or_create_wallets(num_workers, api_base)
+    wallets = wallet_manager.load_or_create_wallets(num_workers, api_base, donation_enabled)
     logger.info(f"Loaded/created {num_workers} wallets")
 
     print()
@@ -881,7 +940,7 @@ def main():
     # Start worker processes
     processes = []
     for i, wallet in enumerate(wallets):
-        p = Process(target=worker_process, args=(wallet, i, status_dict, challenges_file))
+        p = Process(target=worker_process, args=(wallet, i, status_dict, challenges_file, donation_enabled))
         p.start()
         processes.append(p)
         logger.info(f"Started worker process {i} for wallet {wallet['address'][:20]}...")
