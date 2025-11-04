@@ -413,6 +413,7 @@ class MinerWorker:
             'attempts': 0,
             'hash_rate': 0,
             'completed_challenges': 0,
+            'initial_completed_challenges': 0,  # Track session start
             'night_allocation': 0.0,
             'last_update': time.time()
         }
@@ -463,10 +464,18 @@ class MinerWorker:
         stats = self.get_statistics()
         if stats:
             local = stats.get('local', {})
-            self.update_status(
-                completed_challenges=local.get('crypto_receipts', 0),
-                night_allocation=local.get('night_allocation', 0)/1000000.0
-            )
+            completed = local.get('crypto_receipts', 0)
+            night = local.get('night_allocation', 0) / 1000000.0
+
+            # Capture initial completed challenges on first stats update
+            current = dict(self.status_dict[self.worker_id])
+            if current['initial_completed_challenges'] == 0 and completed > 0:
+                current['initial_completed_challenges'] = completed
+
+            current['completed_challenges'] = completed
+            current['night_allocation'] = night
+            current['last_update'] = time.time()
+            self.status_dict[self.worker_id] = current
 
     def build_preimage_static_part(self, challenge):
         return (
@@ -706,6 +715,7 @@ def display_dashboard(status_dict, num_workers, stats_update_interval=600):
             total_hashrate = 0
             total_completed = 0
             total_night = 0
+            session_completed = 0  # Track new challenges this session
 
             for worker_id in range(num_workers):
                 if worker_id not in status_dict:
@@ -734,16 +744,31 @@ def display_dashboard(status_dict, num_workers, stats_update_interval=600):
                 attempts = status.get('attempts', 0) or 0
                 hash_rate = status.get('hash_rate', 0) or 0
                 completed = status.get('completed_challenges', 0) or 0
-                night = color_text(str(round(status.get('night_allocation', 0) or 0, 2)), GREEN)
+                initial_completed = status.get('initial_completed_challenges', 0) or 0
+                night_alloc = status.get('night_allocation', 0) or 0
+
+                # Calculate deltas
+                delta_completed = completed - initial_completed
+
+                # Format completed with delta
+                if delta_completed > 0:
+                    completed_display = f"{completed} (+{delta_completed})"
+                else:
+                    completed_display = str(completed)
+
+                # Format NIGHT (no delta)
+                night_display = color_text(str(round(night_alloc, 2)), GREEN)
 
                 total_hashrate += hash_rate
                 total_completed += completed
-                total_night += status.get('night_allocation', 0) or 0
+                total_night += night_alloc
+                session_completed += delta_completed
 
-                print(f"{worker_id:<4} {address:<44} {challenge_display_padded} {attempts:<10,} {hash_rate:<8.0f} {completed:<10} {night:<10}")
+                print(f"{worker_id:<4} {address:<44} {challenge_display_padded} {attempts:<10,} {hash_rate:<8.0f} {completed_display:<10} {night_display:<10}")
 
-            # Totals row
-            totals_row = f"{'TOTAL':<4} {'':<44} {'':<20} {'':<10} {total_hashrate:<8.0f} {total_completed:<10} {round(total_night, 2):<10}"
+            # Totals row showing session delta for completed challenges only
+            completed_str = f"{total_completed} (+{session_completed})" if session_completed > 0 else str(total_completed)
+            totals_row = f"{'TOTAL':<4} {'':<44} {'':<20} {'':<10} {total_hashrate:<8.0f} {completed_str:<10} {round(total_night, 2):<10}"
             print(color_text("-"*110, CYAN))
             print(color_text(totals_row, CYAN))
             print("="*110)
@@ -830,7 +855,6 @@ def main():
     print("All workers started. Starting dashboard...")
     print("="*70)
     logger.info(f"All {num_workers} workers started successfully")
-    time.sleep(3)
 
     # Start dashboard in main thread
     try:
@@ -849,15 +873,21 @@ def main():
     print("\n✓ All miners stopped")
     logger.info("All workers stopped")
 
-    # Show final challenge statistics
-    tracker = ChallengeTracker(challenges_file)
-    stats = tracker.get_challenge_stats()
-    print(f"\nChallenge Statistics:")
-    print(f"  Total challenges discovered: {stats['total']}")
-    print(f"  Challenges with solutions: {stats['solved']}")
-    print(f"  Unsolved challenges: {stats['unsolved']}")
+    # Show session statistics (what was accomplished this run)
+    session_total_completed = 0
 
-    logger.info(f"Final statistics: {stats['total']} challenges, {stats['solved']} with solutions, {stats['unsolved']} unsolved")
+    for worker_id in range(num_workers):
+        if worker_id in status_dict:
+            status = status_dict[worker_id]
+            completed = status.get('completed_challenges', 0) or 0
+            initial_completed = status.get('initial_completed_challenges', 0) or 0
+
+            session_total_completed += (completed - initial_completed)
+
+    print(f"\nSession Statistics:")
+    print(f"  New challenges solved: {session_total_completed}")
+
+    logger.info(f"Session statistics: {session_total_completed} new challenges solved")
     logger.info("Midnight Miner shutdown complete")
 
     return 0
