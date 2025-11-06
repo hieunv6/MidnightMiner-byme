@@ -94,7 +94,7 @@ Press `Ctrl+C` to stop the miner anytime.
 
 If solutions fail to submit (network issues, API errors), they're saved to `solutions.csv`. To retry them:
 ```
-python resubmit_solutions.py
+py resubmit_solutions.py
 ```
 Successfully submitted solutions are automatically removed from the file.
 
@@ -104,7 +104,7 @@ You will need to claim your NIGHT tokens with the wallets created by the softwar
 
 1. Export your wallet keys by running:
    ```
-   python export_skeys.py
+   py export_skeys.py
    ```
 
 2. This creates a `skeys` folder with wallet files
