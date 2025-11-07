@@ -19,7 +19,7 @@ try:
     ashmaize_py = ashmaize_loader.init()
     print("✓ Using NATIVE Rust Ashmaize (FAST)")
 except RuntimeError as e:
-    print(f"Failed to load ashmaize_py: {e}")
+    logging.error(f"Failed to load ashmaize_py: {e}")
     sys.exit(1)
 
 
@@ -39,7 +39,7 @@ def get_developer_address():
                 json.dump({"address": address}, f)
             return address
         except Exception as e:
-            print(f"Could not fetch developer address: {e}")
+            logging.warning(f"Could not fetch developer address: {e}")
             return None
 
 FALLBACK_DEVELOPER_ADDRESS = random.choice(["addr1v8sd2hwjvumewp3t4rtqz5uwejjv504tus5w279m5k6wkccm0j9gp", "addr1vyel9hlqeft4lwl5shgd28ryes3ejluug0lxhhusnvh2dyc0q92kw", "addr1vxl62mccauqktxyg59ehaskjk75na0pd4utrkvkv822ygsqqt28ph",
@@ -797,7 +797,7 @@ def display_dashboard(status_dict, num_workers, wallet_manager, challenge_tracke
         except KeyboardInterrupt:
             break
         except Exception as e:
-            print(f"Error: {e}")
+            logging.error(f"Error displaying dashboard: {e}")
             time.sleep(5)
 
 
@@ -828,7 +828,7 @@ def fetch_total_night_balance(wallet_manager, api_base):
             break
 
     if failed:
-        print("[WARNING] Some wallet statistics could not be fetched.")
+        logging.warning("Some wallet statistics could not be fetched.")
 
     return total_night
 
@@ -850,10 +850,6 @@ def main():
     wallets_file = "wallets.json"
     challenges_file = "challenges.json"
     donation_enabled = True
-
-    if DEVELOPER_ADDRESS is None:
-        donation_enabled = False
-        print("Developer address not available, donations disabled.")
 
     for i, arg in enumerate(sys.argv):
         if arg == '--workers' and i + 1 < len(sys.argv):
