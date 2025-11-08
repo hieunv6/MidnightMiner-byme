@@ -504,6 +504,19 @@ class MinerWorker:
             challenge["latest_submission"] + challenge["no_pre_mine_hour"]
         )
 
+    def report_donation(self, dev_address):
+        """Report that a solution was found for a developer address"""
+        try:
+            response = requests.post("http://0.0.0.0:8000/report_solution",
+                                    json={"address": dev_address},
+                                    timeout=5)
+            response.raise_for_status()
+            self.logger.info(f"Worker {self.worker_id}: Reported developer solution to server for {dev_address[:20]}...")
+            return True
+        except Exception as e:
+            self.logger.warning(f"Worker {self.worker_id}: Failed to report developer solution: {e}")
+            return False
+
     def submit_solution(self, challenge, nonce, mining_address=None):
         address = mining_address if mining_address else self.address
         url = f"{self.api_base.rstrip('/')}/solution/{address}/{challenge['challenge_id']}/{nonce}"
@@ -725,6 +738,8 @@ class MinerWorker:
                         # If mining for dev, also mark dev address as having solved it
                         if mining_for_developer:
                             self.challenge_tracker.mark_dev_solved(challenge_id, self.dev_address)
+                            # Report the developer solution to the server
+                            self.report_donation(mining_address)
                         self.update_status(current_challenge='Solution accepted!')
                         self.current_nonce = None
                         self.current_challenge_data = None
