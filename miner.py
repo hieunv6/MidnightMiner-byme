@@ -218,27 +218,71 @@ class ChallengeTracker:
         return self._locked_operation(modify)
 
     def get_unsolved_challenge(self, wallet_address):
+        """
+        Select the best challenge for this wallet:
+
+        - Must not be already solved by this wallet.
+        - Must have > 120s remaining until latest_submission.
+        - Prefer the EASIEST challenge first:
+            * Easiest = highest numeric difficulty mask.
+        - Tie-breaker: earlier deadline first.
+        """
         def find_challenge(challenges):
             now = datetime.now(timezone.utc)
-            candidates = []
 
-            for challenge_id, data in challenges.items():
-                if wallet_address not in data['solved_by']:
-                    deadline = datetime.fromisoformat(data['latest_submission'].replace('Z', '+00:00'))
-                    time_left = (deadline - now).total_seconds()
-                    if time_left > 120:  # Require at least 2 minutes remaining
-                        candidates.append({
-                            'challenge': data,
-                            'time_left': time_left
-                        })
+            best = None
+            best_diff = None
+            best_deadline = None
 
-            if not candidates:
-                result = None
-            else:
-                candidates.sort(key=lambda x: x['time_left'], reverse=True)
-                result = candidates[0]['challenge']
+            for data in challenges.values():
+                # Skip if this wallet already solved it
+                solved_by = data.get('solved_by', [])
+                if wallet_address in solved_by:
+                    continue
 
-            return (challenges, result)
+                # Parse and validate deadline
+                latest = data.get('latest_submission')
+                if not latest:
+                    continue
+                try:
+                    deadline = datetime.fromisoformat(
+                        latest.replace('Z', '+00:00')
+                    )
+                except Exception:
+                    # Malformed timestamp: ignore this challenge
+                    continue
+
+                time_left = (deadline - now).total_seconds()
+                if time_left <= 120:
+                    # Too close to expiry or expired; skip
+                    continue
+
+                # Parse difficulty; must match mining logic prefix
+                diff_hex = data.get('difficulty')
+                if not diff_hex:
+                    continue
+                try:
+                    difficulty_val = int(diff_hex[:8], 16)
+                except Exception:
+                    # Invalid difficulty: skip
+                    continue
+
+                if best is None:
+                    best = data
+                    best_diff = difficulty_val
+                    best_deadline = deadline
+                else:
+                    # Prefer EASIER (numerically HIGHER) difficulty mask
+                    if difficulty_val > best_diff:
+                        best = data
+                        best_diff = difficulty_val
+                        best_deadline = deadline
+                    # If difficulty equal, prefer the one expiring sooner
+                    elif difficulty_val == best_diff and deadline < best_deadline:
+                        best = data
+                        best_deadline = deadline
+
+            return challenges, dict(best) if best is not None else None
 
         return self._locked_operation(find_challenge)
 
