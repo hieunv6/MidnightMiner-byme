@@ -110,6 +110,20 @@ def unlock_file(file_handle):
         fcntl.flock(file_handle.fileno(), fcntl.LOCK_UN)
 
 
+def backup_wallets_file(wallet_file):
+    """Backup wallets.json to wallets.json.bak before making changes"""
+    if os.path.exists(wallet_file):
+        backup_file = wallet_file + ".bak"
+        try:
+            import shutil
+            shutil.copy2(wallet_file, backup_file)
+            return True
+        except Exception as e:
+            logging.warning(f"Failed to create backup of {wallet_file}: {e}")
+            return False
+    return False
+
+
 def append_solution_to_csv(address, challenge_id, nonce):
     """Append solution to solutions.csv with proper file locking"""
     try:
@@ -454,6 +468,7 @@ class WalletManager:
         # Only save wallets if all registrations succeeded
         with open(self.wallet_file, 'w') as f:
             json.dump(self.wallets, f, indent=2)
+        backup_wallets_file(self.wallet_file)
 
         print(f"✓ Total wallets: {len(self.wallets)}")
         return self.wallets
@@ -463,6 +478,7 @@ class WalletManager:
         with self._lock:
             with open(self.wallet_file, 'w') as f:
                 json.dump(self.wallets, f, indent=2)
+            backup_wallets_file(self.wallet_file)
 
     def add_wallet(self, wallet_data):
         """Add a new wallet to the manager"""
@@ -506,6 +522,7 @@ class WalletManager:
             self.wallets.append(wallet)
             with open(self.wallet_file, 'w') as f:
                 json.dump(self.wallets, f, indent=2)
+            backup_wallets_file(self.wallet_file)
 
         return wallet
 
