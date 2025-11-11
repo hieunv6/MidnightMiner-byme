@@ -299,7 +299,6 @@ def main():
             print(f"  ✗ Failed to donate")
             fail_count += 1
         print()
-        input("Press any key to continue... ")
 
     # Summary
     print("="*70)
