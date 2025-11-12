@@ -150,6 +150,20 @@ To disable donations, add the `--no-donation` flag:
 python miner.py --no-donation
 ```
 
+### Summarizing NIGHT Balances
+
+To quickly fetch the NIGHT token balances for all wallets stored in your JSON files, use the `sum_night_balance.py` utility:
+
+```
+python sum_night_balance.py --wallets-path wallets.json json --proxy-count 30 --proxy-config proxy.json
+```
+
+- `--wallets-path` accepts one or more files or directories containing wallet JSON definitions.
+- `--proxy-count` limits how many proxy-backed sessions are created simultaneously. For faster results, prepare at least that many proxy entries in `proxy.json`.
+- `--proxy-config` points to the proxy configuration file; if omitted, the script will fall back to direct connections.
+
+> **Tip:** Supplying a rich proxy pool dramatically reduces the chance of hitting rate limits while the script queries the statistics API.
+
 ## Consolidating NIGHT Earnings
 
 You can consolidate all NIGHT earnings to a single wallet using `consolidate.py`. This allows you to save on transaction fees by receiving all NIGHT tokens to a single address (when they are distributed).
