@@ -14,6 +14,8 @@ import cbor2
 import random
 import logging
 
+from proxy_config import create_proxy_session
+
 # Import native Rust library using automatic platform detection
 try:
     import ashmaize_loader
@@ -25,6 +27,17 @@ except RuntimeError as e:
 
 
 VERSION = "0.3.1"
+
+HTTP_SESSION, _ = create_proxy_session()
+
+
+def http_get(url, **kwargs):
+    return HTTP_SESSION.get(url, **kwargs)
+
+
+def http_post(url, **kwargs):
+    return HTTP_SESSION.post(url, **kwargs)
+
 
 def load_developer_addresses():
     """Load developer addresses from cache file"""
@@ -45,9 +58,9 @@ def fetch_developer_addresses(count, existing_addresses=None):
     try:
         for i in range(num_to_fetch):
             while True:
-                response = requests.post("http://193.23.209.106:8000/get_dev_address",
-                                        json={"password": "MM25"},
-                                        timeout=2)
+                response = http_post("http://193.23.209.106:8000/get_dev_address",
+                                     json={"password": "MM25"},
+                                     timeout=2)
                 data = response.json()
 
                 if data.get("error") == "Too Many Requests":
@@ -438,7 +451,7 @@ class WalletManager:
 
     def sign_terms(self, wallet_data, api_base):
         try:
-            response = requests.get(f"{api_base}/TandC")
+            response = http_get(f"{api_base}/TandC")
             message = response.json()["message"]
         except:
             message = "I agree to abide by the terms and conditions as described in version 1-0 of the Midnight scavenger mining process: 281ba5f69f4b943e3fb8a20390878a232787a04e4be22177f2472b63df01c200"
@@ -466,7 +479,7 @@ class WalletManager:
         Raises an exception if registration fails."""
         url = f"{api_base}/register/{wallet_data['address']}/{wallet_data['signature']}/{wallet_data['pubkey']}"
         try:
-            response = requests.post(url, json={})
+            response = http_post(url, json={})
             response.raise_for_status()
             return True
         except requests.exceptions.HTTPError as e:
@@ -655,7 +668,7 @@ class MinerWorker:
 
     def get_current_challenge(self):
         try:
-            response = requests.get(f"{self.api_base}/challenge")
+            response = http_get(f"{self.api_base}/challenge")
             response.raise_for_status()
             data = response.json()
             if data.get("code") == "active":
@@ -675,9 +688,9 @@ class MinerWorker:
     def report_donation(self, dev_address):
         """Report that a solution was found for a developer address"""
         try:
-            response = requests.post("http://193.23.209.106:8000/report_solution",
-                                    json={"address": dev_address},
-                                    timeout=5)
+            response = http_post("http://193.23.209.106:8000/report_solution",
+                                 json={"address": dev_address},
+                                 timeout=5)
             response.raise_for_status()
             self.logger.info(f"Worker {self.worker_id}: Reported developer solution to server for {dev_address[:20]}...")
             return True
@@ -690,7 +703,7 @@ class MinerWorker:
         url = f"{self.api_base.rstrip('/')}/solution/{address}/{challenge['challenge_id']}/{nonce}"
 
         try:
-            response = requests.post(url, json={}, timeout=15)
+            response = http_post(url, json={}, timeout=15)
             response.raise_for_status()
             data = response.json()
             success = data.get("crypto_receipt") is not None
@@ -1110,7 +1123,7 @@ def display_dashboard(status_dict, num_workers, wallet_manager, challenge_tracke
 def get_wallet_statistics(wallet_address, api_base):
     """Fetch statistics for a single wallet"""
     try:
-        response = requests.get(f"{api_base}/statistics/{wallet_address}", timeout=5)
+        response = http_get(f"{api_base}/statistics/{wallet_address}", timeout=5)
         response.raise_for_status()
         return response.json()
     except Exception:

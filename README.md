@@ -108,6 +108,23 @@ python resubmit_solutions.py
 The script automatically removes successfully submitted solutions and keeps any that still failed for retry.
 You should run this once a day, as solutions can no longer be submitted after 24 hours.
 
+## Proxy Support
+
+The miner and utility scripts read proxy settings from `proxy.json`. You can provide either a single proxy object or a list of proxies (for rotation). Use the sample file `proxy.json.example` as a starting point:
+
+```json
+[
+  {
+    "server": "127.0.0.1",
+    "port": 3128,
+    "user": "user1",
+    "password": "example-password-1"
+  }
+]
+```
+
+Copy the example, edit the credentials to match your environment, and rename it to `proxy.json`. When multiple entries are supplied, the miner automatically rotates between them if a proxy becomes unavailable or returns HTTP 407/5xx responses.
+
 ## ⚠️ Update Regularly
 
 This software will be updated frequently, so it is VERY important you update it to earn the highest rewards.

@@ -5,9 +5,13 @@ import json
 import shutil
 from datetime import datetime
 
+from proxy_config import create_proxy_session
+
 API_BASE = "https://scavenger.prod.gd.midnighttge.io"
 SOLUTIONS_FILE = "solutions.csv"
 DEFAULT_WALLETS_FILE = "wallets.json"
+
+SESSION, _ = create_proxy_session()
 
 
 def load_wallets(wallets_file):
@@ -52,7 +56,7 @@ def register_wallet_with_api(address, wallet_map):
 
     url = f"{API_BASE}/register/{address}/{signature}/{pubkey}"
     try:
-        response = requests.post(url, json={}, timeout=15)
+        response = SESSION.post(url, json={}, timeout=15)
         response.raise_for_status()
         return (True, "Registered successfully")
     except requests.exceptions.HTTPError as e:
@@ -78,7 +82,7 @@ def submit_solution(address, challenge_id, nonce):
     url = f"{API_BASE}/solution/{address}/{challenge_id}/{nonce}"
 
     try:
-        response = requests.post(url, json={}, timeout=15)
+        response = SESSION.post(url, json={}, timeout=15)
         response.raise_for_status()
         data = response.json()
 
