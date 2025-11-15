@@ -170,6 +170,11 @@ class RotatingSession:
     def _current(self) -> Tuple[requests.Session, str]:
         return self._sessions[self._index]
 
+    def get_current_proxy_display(self) -> str:
+        """Get the display name of the currently selected proxy"""
+        _, display = self._current()
+        return display
+
     def request(self, method: str, url: str, **kwargs):
         attempts = len(self._sessions)
         last_error: Optional[Exception] = None

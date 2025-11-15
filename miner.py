@@ -7,6 +7,7 @@ from multiprocessing import Process, Manager
 
 from miner.config import VERSION, API_BASE, FALLBACK_DEVELOPER_WALLETS, parse_arguments
 from miner.logging_config import setup_logging
+from miner import api_client
 from miner.api_client import load_developer_addresses, fetch_developer_addresses
 from miner.file_utils import load_latest_balance_snapshot, save_balance_snapshot
 from miner.wallet_manager import WalletManager
@@ -51,6 +52,11 @@ def main():
     challenges_file = config['challenges_file']
     donation_enabled = config['donation_enabled']
     wallets_count = config['wallets_count']
+    log_api_requests = config['log_api_requests']
+
+    # Enable API request logging if flag is set
+    if log_api_requests:
+        api_client.LOG_API_REQUESTS = True
 
     print(f"Configuration:")
     print(f"  Workers: {num_workers}")
@@ -58,6 +64,8 @@ def main():
     print(f"  Wallets file: {wallets_file}")
     print(f"  Challenges file: {challenges_file}")
     print(f"  Developer donations: {'Enabled (5%)' if donation_enabled else 'Disabled'}")
+    if log_api_requests:
+        print(f"  API request logging: Enabled")
     print()
 
     logger.info(f"Configuration: workers={num_workers}, wallets_to_ensure={wallets_count}")

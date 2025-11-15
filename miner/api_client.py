@@ -3,19 +3,42 @@ import os
 import json
 import time
 import logging
-from proxy_config import create_proxy_session
+from proxy_config import create_proxy_session, RotatingSession
 
 # Initialize HTTP session with proxy support
-HTTP_SESSION, _ = create_proxy_session()
+HTTP_SESSION, PROXY_ENTRIES = create_proxy_session()
+
+# Flag to enable API request logging (set by main process)
+LOG_API_REQUESTS = False
+
+
+def _get_proxy_display():
+    """Get the current proxy display name for logging"""
+    if PROXY_ENTRIES is None:
+        return "direct connection"
+    elif isinstance(HTTP_SESSION, RotatingSession):
+        return HTTP_SESSION.get_current_proxy_display()
+    elif len(PROXY_ENTRIES) == 1:
+        return PROXY_ENTRIES[0]['display']
+    else:
+        return "unknown proxy"
 
 
 def http_get(url, **kwargs):
     """Perform HTTP GET request using configured session"""
+    if LOG_API_REQUESTS:
+        logger = logging.getLogger('midnight_miner')
+        proxy_display = _get_proxy_display()
+        logger.info(f"GET {url} via {proxy_display}")
     return HTTP_SESSION.get(url, **kwargs)
 
 
 def http_post(url, **kwargs):
     """Perform HTTP POST request using configured session"""
+    if LOG_API_REQUESTS:
+        logger = logging.getLogger('midnight_miner')
+        proxy_display = _get_proxy_display()
+        logger.info(f"POST {url} via {proxy_display}")
     return HTTP_SESSION.post(url, **kwargs)
 
 

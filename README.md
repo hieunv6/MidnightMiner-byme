@@ -142,6 +142,7 @@ The miner and utility scripts read proxy settings from `proxy.json`. You can pro
 
 Copy the example, edit the credentials to match your environment, and rename it to `proxy.json`. When multiple entries are supplied, the miner automatically rotates between them if a proxy becomes unavailable or returns HTTP 407/5xx responses.
 
+You can verify the proxy is working correctly by running the miner with the `--log-api-requests` flag.
 
 ## Developer Donations
 
