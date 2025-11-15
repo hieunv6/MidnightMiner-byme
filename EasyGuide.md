@@ -107,10 +107,10 @@ To make claiming easier, you need to send all earnings to a single address using
 
 **To consolidate:**
 ```
-py consolidate.py --destination addr1...
+py consolidate.py
 ```
 
-Replace `addr1...` with your actual destination address. Type `CONFIRM` when prompted to proceed.
+Paste a destination address when propmpted (the one that you will claim all consolidated NIGHT from). Type `CONFIRM` when prompted to proceed.
 
 **To undo consolidation:**
 ```

@@ -15,10 +15,25 @@ from miner.statistics import fetch_total_night_balance
 from miner.dashboard import display_dashboard
 from miner.worker_process import worker_process
 
+def display_consolidation_warning():
+    print()
+    print("="*70)
+    print("⚠ IMPORTANT: Wallet Consolidation Recommended ⚠")
+    print("="*70)
+    print("This miner uses multiple wallets to mine efficiently.")
+    print("To avoid transaction fees you need to consolidate your NIGHT")
+    print("into a single wallet.")
+    print("You can use the 'consolidate.py' script to assist with this.")
+    print("Check the README for instructions.")
+    print()
 
 def main():
     """Main entry point with continuous worker spawning"""
     logger = setup_logging()
+
+    display_consolidation_warning()
+    time.sleep(3)
+    print()
 
     print("="*70)
     print(f"MIDNIGHT MINER - v{VERSION}")
@@ -250,7 +265,9 @@ def main():
         print("Run 'python resubmit_solutions.py' to try submitting them again.\n")
 
     logger.info(f"Session statistics: {session_total_completed} new challenges solved")
-    logger.info("Midnight Miner shutdown complete")
+    logger.info("Midnight Miner shutdown complete\n\n")
+
+    display_consolidation_warning()
 
     return 0
 
