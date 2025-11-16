@@ -8,8 +8,10 @@ import requests
 import json
 import sys
 import os
-from pycardano import PaymentSigningKey, Address
+from pycardano import PaymentSigningKey, Address, PaymentExtendedSigningKey
 import cbor2
+from datetime import datetime, timezone
+import traceback
 
 
 def load_wallets(wallet_file="wallets.json"):
@@ -35,8 +37,11 @@ def create_donation_signature(wallet_data, destination_address):
         message = f"Assign accumulated Scavenger rights to: {destination_address}"
 
         # Load signing key
-        signing_key_bytes = bytes.fromhex(wallet_data['signing_key'])
-        signing_key = PaymentSigningKey.from_primitive(signing_key_bytes)
+        signing_key_cbor = bytes.fromhex(wallet_data['signing_key'])
+        signing_key_bytes = cbor2.loads(signing_key_cbor)
+        signing_key = PaymentExtendedSigningKey.from_primitive(signing_key_bytes)
+
+        # signing_key = PaymentExtendedSigningKey.from_primitive(signing_key_bytes)
 
         # Load address
         address = Address.from_primitive(wallet_data['address'])
@@ -61,6 +66,78 @@ def create_donation_signature(wallet_data, destination_address):
     except Exception as e:
         print(f"Error creating signature for {wallet_data['address'][:20]}...: {e}")
         return None
+
+
+LOG_FILE = "failed_requests.json"
+OLD_LOG_FILE = "failed_requests.log"
+
+
+def log_failed_request(url, wallet_data, exception, response=None, note=None):
+    """Append a JSON line to LOG_FILE describing a failed request/post call."""
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "url": url,
+        "wallet_address": wallet_data.get('address') if isinstance(wallet_data, dict) else str(wallet_data),
+        "exception": repr(exception),
+    }
+    if note:
+        entry["note"] = note
+
+    if response is not None:
+        try:
+            entry["status_code"] = getattr(response, 'status_code', None)
+            # attempt to capture json if possible, otherwise text
+            try:
+                entry["response_json"] = response.json()
+            except Exception:
+                entry["response_text"] = getattr(response, 'text', '')
+        except Exception:
+            entry["response_capture_error"] = traceback.format_exc()
+
+    try:
+        # If an old line-delimited log exists and the new JSON file doesn't, migrate it
+        if not os.path.exists(LOG_FILE) and os.path.exists(OLD_LOG_FILE):
+            migrated = []
+            try:
+                with open(OLD_LOG_FILE, "r", encoding="utf-8") as oldf:
+                    for ln in oldf:
+                        ln = ln.strip()
+                        if not ln:
+                            continue
+                        try:
+                            migrated.append(json.loads(ln))
+                        except Exception:
+                            # ignore malformed lines
+                            pass
+            except Exception:
+                migrated = []
+
+            # write migrated entries plus current one
+            migrated.append(entry)
+            with open(LOG_FILE, "w", encoding="utf-8") as f:
+                json.dump(migrated, f, ensure_ascii=False, indent=2)
+            return
+
+        # Normal append path: load file, append entry, write back
+        if not os.path.exists(LOG_FILE):
+            with open(LOG_FILE, "w", encoding="utf-8") as f:
+                json.dump([entry], f, ensure_ascii=False, indent=2)
+        else:
+            try:
+                with open(LOG_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if not isinstance(data, list):
+                        # if the file has some other JSON value, wrap it
+                        data = [data]
+            except Exception:
+                data = []
+
+            data.append(entry)
+            with open(LOG_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        # Do not raise -- just print so operation can continue
+        print(f"  ✗ Failed to write to log file {LOG_FILE}: {e}")
 
 
 def donate_wallet(destination_address, wallet_data, api_base):
@@ -88,6 +165,11 @@ def donate_wallet(destination_address, wallet_data, api_base):
                 if "is not registered" in error_msg or "not accepted Terms and Conditions" in error_msg:
                     print(f"  ✗ Destination address is not registered")
                     print(f"  → Register at: https://sm.midnight.gd")
+                    # Log the failed request
+                    try:
+                        log_failed_request(url, wallet_data, e, getattr(e, 'response', None), note="destination not registered")
+                    except Exception:
+                        pass
                     return False
             except:
                 pass
@@ -97,20 +179,31 @@ def donate_wallet(destination_address, wallet_data, api_base):
             try:
                 error_json = e.response.json()
                 error_msg = error_json.get("message", "")
-                if "already has an active donation assignment" in error_msg:
-                    print(f"  ✓ Already consolidated to this address")
-                    return True
+                print(f"  {error_msg}")
+                return True
             except:
                 pass
 
         error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
         print(f"  ✗ HTTP Error {e.response.status_code}: {error_detail}")
+        try:
+            log_failed_request(url, wallet_data, e, getattr(e, 'response', None))
+        except Exception:
+            pass
         return False
     except requests.exceptions.RequestException as e:
         print(f"  ✗ Network error: {e}")
+        try:
+            log_failed_request(url, wallet_data, e, getattr(e, 'response', None), note="network error")
+        except Exception:
+            pass
         return False
     except Exception as e:
         print(f"  ✗ Error: {e}")
+        try:
+            log_failed_request(url, wallet_data, e, None, note="unexpected error")
+        except Exception:
+            pass
         return False
 
 
@@ -146,12 +239,24 @@ def undo_wallet(wallet_data, api_base):
 
         error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
         print(f"  ✗ HTTP Error {e.response.status_code}: {error_detail}")
+        try:
+            log_failed_request(url, wallet_data, e, getattr(e, 'response', None))
+        except Exception:
+            pass
         return False
     except requests.exceptions.RequestException as e:
         print(f"  ✗ Network error: {e}")
+        try:
+            log_failed_request(url, wallet_data, e, getattr(e, 'response', None), note="network error")
+        except Exception:
+            pass
         return False
     except Exception as e:
         print(f"  ✗ Error: {e}")
+        try:
+            log_failed_request(url, wallet_data, e, None, note="unexpected error")
+        except Exception:
+            pass
         return False
 
 
