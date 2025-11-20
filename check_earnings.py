@@ -1,4 +1,3 @@
-
 import argparse
 import json
 import sys
@@ -7,10 +6,41 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional, Set, Tuple
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from proxy_config import load_proxy_config
 
-DEFAULT_API_BASE = "https://scavenger.prod.gd.midnighttge.io"
+# API endpoint đúng
+DEFAULT_API_BASE = "https://sm.midnight.gd/api"
+
+# Chrome headers đầy đủ từ browser
+CHROME_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Sec-Ch-Ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'Priority': 'u=0, i',
+}
+
+# Cookies từ trình duyệt (cập nhật với cookies của bạn)
+COOKIES = {
+    '_ga': 'GA1.1.219939507.1761750754',
+    '_ga_M47C6SYY2F': 'GS1.1.1763305875.3.1.1763306243.56.0.0',
+    'KP_UIDz-ssn': '02QCPMIhzqvKT0dOkCCe3P3ERTUuIBgvNb89i3ewjKdfLcTCl30kcH1V7rH3L1lGpYz8tU0XH4ppnGs8Q7jiAbsWHnhAoK6GYN7Bj0SeD1NLim126H5DjYa4qkAGFJCB1xWYgdhMULTFpaatvXzz17SnO67OJHI0ti8OK3csWp',
+    'KP_UIDz': '02QCPMIhzqvKT0dOkCCe3P3ERTUuIBgvNb89i3ewjKdfLcTCl30kcH1V7rH3L1lGpYz8tU0XH4ppnGs8Q7jiAbsWHnhAoK6GYN7Bj0SeD1NLim126H5DjYa4qkAGFJCB1xWYgdhMULTFpaatvXzz17SnO67OJHI0ti8OK3csWp',
+    '_ga_9VN0MKVGW1': 'GS1.1.1763515502.26.1.1763515943.60.0.0',
+}
 
 
 def discover_wallet_files(root: Path) -> Iterable[Path]:
@@ -52,7 +82,7 @@ def extract_addresses_from_json(path: Path) -> Set[str]:
 def fetch_wallet_statistics(session: requests.Session, wallet_address: str, api_base: str) -> Optional[Tuple[float, int, dict]]:
     url = f"{api_base}/statistics/{wallet_address}"
     try:
-        response = session.get(url, timeout=8)
+        response = session.get(url, timeout=15)
         response.raise_for_status()
         payload = response.json()
     except Exception as exc:  # noqa: BLE001
@@ -81,10 +111,38 @@ def mask_wallet_address(address: str, visible: int = 6) -> str:
     return f"{address[:visible]}...{address[-visible:]}"
 
 
-def create_sessions(proxy_config_path: str, desired_workers: int) -> Tuple[Tuple[requests.Session, str], ...]:
+def load_cookies_from_file(cookies_path: str) -> Dict[str, str]:
+    """Load cookies from JSON file if exists"""
+    try:
+        path = Path(cookies_path)
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[WARN] Failed to load cookies from {cookies_path}: {e}")
+    return COOKIES
+
+
+def create_sessions(proxy_config_path: str, desired_workers: int, cookies_path: Optional[str] = None) -> Tuple[Tuple[requests.Session, str], ...]:
     proxies = load_proxy_config(proxy_config_path)
+    
+    # Load cookies
+    cookies = load_cookies_from_file(cookies_path) if cookies_path else COOKIES
 
     sessions: list[Tuple[requests.Session, str]] = []
+    
+    # Tạo retry strategy
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy, 
+        pool_connections=100, 
+        pool_maxsize=100
+    )
 
     if proxies:
         for entry in proxies[:desired_workers]:
@@ -93,6 +151,18 @@ def create_sessions(proxy_config_path: str, desired_workers: int) -> Tuple[Tuple
             session.proxies.update(entry["proxies"])
             if entry["auth_header"]:
                 session.headers["Proxy-Authorization"] = entry["auth_header"]
+            
+            # Thêm Chrome headers
+            session.headers.update(CHROME_HEADERS)
+            
+            # Thêm cookies
+            for key, value in cookies.items():
+                session.cookies.set(key, value, domain='.midnight.gd')
+            
+            # Thêm retry adapter
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            
             display = entry["display"]
             sessions.append((session, display))
         print(f"Using {len(sessions)} proxy-backed session(s) (configured: {len(proxies)}).")
@@ -100,6 +170,18 @@ def create_sessions(proxy_config_path: str, desired_workers: int) -> Tuple[Tuple
         for idx in range(desired_workers):
             session = requests.Session()
             session.trust_env = False
+            
+            # Thêm Chrome headers
+            session.headers.update(CHROME_HEADERS)
+            
+            # Thêm cookies
+            for key, value in cookies.items():
+                session.cookies.set(key, value, domain='.midnight.gd')
+            
+            # Thêm retry adapter
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            
             sessions.append((session, f"direct#{idx + 1}"))
         print(f"Using {len(sessions)} direct session(s) without proxy.")
 
@@ -148,6 +230,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         default=16,
         help="Maximum number of concurrent proxy sessions (default: 16)",
     )
+    parser.add_argument(
+        "--cookies",
+        type=str,
+        help="Path to cookies JSON file (optional)",
+    )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -177,7 +264,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     sorted_addresses = sorted(addresses)
     session_target = max(1, min(args.proxy_count, len(sorted_addresses)))
 
-    sessions = create_sessions(args.proxy_config, session_target)
+    sessions = create_sessions(args.proxy_config, session_target, args.cookies)
 
     try:
         chunks: list[Tuple[requests.Session, str, list[str]]] = []
@@ -225,5 +312,3 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
